@@ -23,7 +23,7 @@
 #endif
 
 #ifdef ENABLE_OPENSSL   /* empty file without openssl */
-
+ 
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -62,7 +62,10 @@
 		| SC_ALGORITHM_RSA_PAD_PKCS1	\
 		| SC_ALGORITHM_RSA_HASH_NONE	\
 		| SC_ALGORITHM_RSA_HASH_SHA1	\
-		| SC_ALGORITHM_RSA_HASH_SHA256)
+		| SC_ALGORITHM_RSA_HASH_SHA224	\
+		| SC_ALGORITHM_RSA_HASH_SHA256	\
+		| SC_ALGORITHM_RSA_HASH_SHA384	\
+		| SC_ALGORITHM_RSA_HASH_SHA512)
 
 //#define TESTING
 
@@ -148,7 +151,11 @@ unsigned char laser_ops_pin[7] = {
 	SC_AC_OP_READ, SC_AC_OP_PIN_CHANGE, SC_AC_OP_ADMIN, SC_AC_OP_DELETE_SELF, SC_AC_OP_GENERATE, SC_AC_OP_PIN_RESET, SC_AC_OP_CRYPTO
 };
 
-
+static const unsigned char laser_sha1_digest_pref[] = { 0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A, 0x05, 0x00, 0x04, 0x14 };
+static const unsigned char laser_sha224_digest_pref[] = { 0x30, 0x2D, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04, 0x05, 0x00, 0x04, 0x1C };
+static const unsigned char laser_sha256_digest_pref[] = { 0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
+static const unsigned char laser_sha384_digest_pref[] = { 0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30 };
+static const unsigned char laser_sha512_digest_pref[] = { 0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40 };
 
 
 static int laser_get_serialnr(struct sc_card *, struct sc_serial_number *);
@@ -1816,6 +1823,8 @@ laser_compute_signature_dst(struct sc_card *card,
 	unsigned char algo;
 	int rv;
 	size_t offs;
+	const unsigned char* asn1Pref = NULL;
+	size_t asn1PrefLen = 0;
 
 	LOG_FUNC_CALLED(ctx);
 	sc_log(ctx, "in-length:%i, key-size:%i", in_len, (prv->last_ko != NULL ? prv->last_ko->size : 0));
@@ -1826,19 +1835,42 @@ laser_compute_signature_dst(struct sc_card *card,
 	else if (prv->last_ko && in_len > (prv->last_ko->size - 11))
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "too much of the input data");
 
-	if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA1)
-		algo = 0x0A;	/* ALG_RSA_SHA_PKCS1 */
-	else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA256)
-		algo = 0x28;	/* ALG_RSA_SHA_256_PKCS1 */
-	else
-		algo = 0x8A;	/* ALG_RSA_PKCS1 */
+	if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA1) {
+		asn1Pref = laser_sha1_digest_pref;
+		asn1PrefLen = sizeof(laser_sha1_digest_pref);
+	}
+	else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA224) {
+		asn1Pref = laser_sha224_digest_pref;
+		asn1PrefLen = sizeof(laser_sha224_digest_pref);
+	}
+	else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA256) {
+		asn1Pref = laser_sha256_digest_pref;
+		asn1PrefLen = sizeof(laser_sha256_digest_pref);
+	}
+	else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA384) {
+		asn1Pref = laser_sha384_digest_pref;
+		asn1PrefLen = sizeof(laser_sha384_digest_pref);
+	}
+	else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA512) {
+		asn1Pref = laser_sha512_digest_pref;
+		asn1PrefLen = sizeof(laser_sha512_digest_pref);
+	}
 
 	offs = 0;
 	sbuf[offs++] = 0x80;
 	sbuf[offs++] = 0x81;
-	sbuf[offs++] = in_len;
+	if (0 < asn1PrefLen) {
+		sbuf[offs++] = in_len + asn1PrefLen;
+		memcpy(sbuf + offs, asn1Pref, asn1PrefLen);
+		offs += asn1PrefLen;
+	}
+	else {
+		sbuf[offs++] = in_len;
+	}
 	memcpy(sbuf + offs, in, in_len);
 	offs += in_len;
+
+	algo = 0x8A;	/* always ALG_RSA_PKCS1 */
 
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_4_SHORT, 0x2A, 0x9E, algo);
 	apdu.flags |= SC_APDU_FLAGS_CHAINING;
@@ -1849,7 +1881,7 @@ laser_compute_signature_dst(struct sc_card *card,
 	apdu.resp = rbuf;
 	apdu.resplen = out_len;
 
-        rv = sc_transmit_apdu(card, &apdu);
+    rv = sc_transmit_apdu(card, &apdu);
 	LOG_TEST_RET(ctx, rv, "APDU transmit failed");
 	rv = sc_check_sw(card, apdu.sw1, apdu.sw2);
 	LOG_TEST_RET(ctx, rv, "PSO DST failed");
