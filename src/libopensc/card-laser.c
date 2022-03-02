@@ -728,7 +728,7 @@ laser_parse_sec_attrs(struct sc_card *card, struct sc_file *file)
 			sc_file_add_acl_entry(file, *(ops + ii), SC_AC_SCB, val);
 		}
 		else if (*(attrs + ii*2 + 1) == 0xFF)   {
-			sc_log(ctx, "op:%X SC_AC_NEVER, val:%X", *(ops + ii));
+			sc_log(ctx, "op:%X SC_AC_NEVER", *(ops + ii));
 			sc_file_add_acl_entry(file, *(ops + ii), SC_AC_NEVER, SC_AC_KEY_REF_NONE);
 		}
 		else if (*(attrs + ii*2 + 1))   {
@@ -744,7 +744,7 @@ laser_parse_sec_attrs(struct sc_card *card, struct sc_file *file)
 			sc_file_add_acl_entry(file, *(ops + ii), method, ref);
 		}
 		else   {
-			sc_log(ctx, "op:%X SC_AC_NONE, val:%X", *(ops + ii));
+			sc_log(ctx, "op:%X SC_AC_NONE", *(ops + ii));
 			sc_file_add_acl_entry(file, *(ops + ii), SC_AC_NONE, SC_AC_KEY_REF_NONE);
 		}
 	}
@@ -1090,7 +1090,7 @@ laser_set_security_env(struct sc_card *card,
 	if (!senv)
 		LOG_FUNC_RETURN(ctx, SC_ERROR_INVALID_ARGUMENTS);
 
-	sc_log(ctx, "laser_set_security_env() op:%X,flags:%X,algo:(%X,ref:%X,flags:%X)",
+	sc_log(ctx, "laser_set_security_env() op:%X,flags:%lX,algo:(%X,ref:%X,flags:%X)",
 			senv->operation, senv->flags, senv->algorithm, senv->algorithm_ref, senv->algorithm_flags);
 	*env = *senv;
 	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
@@ -1434,14 +1434,15 @@ laser_pin_change(struct sc_card *card, struct sc_pin_cmd_data *data, int *tries_
 		chv_ref = 0;
 		entry = sc_file_get_acl_entry(pin_file, SC_AC_OP_PIN_CHANGE);
 		if (entry)   {
-			if (entry->key_ref & 0xC000)   {
+			// Skip check 'Secure Messaging is required' - always use secure messaging
+			//if (entry->key_ref & 0xC000)   {
 #ifdef ENABLE_SM
 				rv = laser_sm_chv_change(card, data, chv_ref, tries_left, entry->key_ref);
 				LOG_FUNC_RETURN(ctx, rv);
 #else
 				LOG_FUNC_RETURN(ctx, SC_ERROR_NOT_SUPPORTED);
 #endif /* ifdef ENABLE_SM */
-			}
+			//}
 		}
 	}
 
